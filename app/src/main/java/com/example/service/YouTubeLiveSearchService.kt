@@ -821,7 +821,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     lastCommentClickTime = System.currentTimeMillis()
                     lastCommentComposerOpenTime = System.currentTimeMillis()
                     wasCommentComposerOpen = true
-                } else if (isSessionActive && !isCommentRelated && (looksLikeVideoCard || isNextOrPrevOrCollapse)) {
+                } else if (isSessionActive && !isAnyCommentClick && !isCommentRelated && !inTopPlayerArea && !isPlayPauseBtnClick && !isAnyLikeClick) {
                     checkIfUserClickedDifferentVideo(node, desc, text, viewId, "$evText $evDesc".trim())
                 }
 
@@ -2891,12 +2891,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 viewId.contains("bottom_sheet", ignoreCase = true) ||
                 viewId.contains("engagement_panel", ignoreCase = true) ||
                 isSoftKeyboardVisible() ||
-                wasCommentComposerOpen ||
-                wasCommentEditTextActive ||
-                hasTypedCommentText ||
-                (now - lastCommentComposerOpenTime) < 60_000L ||
-                (now - lastCommentClickTime) < 60_000L ||
-                (now - lastTypedCommentTime) < 60_000L
+                (now - lastCommentClickTime) < 3000L ||
+                (now - lastTypedCommentTime) < 3000L
 
         if (isCommentOrSendAction) {
             lastCommentClickTime = now
@@ -3102,49 +3098,38 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 cardViewId.contains("engagement") ||
                 cardViewId.contains("bottom_sheet")
 
-        if (isCommentSubtree) {
-            return
-        }
-
-        val isConfirmedVideoCard = (looksLikeCard ||
-                cardViewId.contains("video_lockup") ||
-                cardViewId.contains("compact_video") ||
-                cardViewId.contains("rich_item") ||
-                cardViewId.contains("video_card") ||
-                cardText.contains("Go to channel", ignoreCase = true) ||
-                cardText.contains("चैनल पर जाएं", ignoreCase = true) ||
-                (cardViewId.contains("video") && cardText.contains("views", ignoreCase = true))) &&
-                !isHarmlessAction
-
-        if (!isConfirmedVideoCard) {
-            // Not a video recommendation card. Never fail task on non-video clicks (e.g. comments, description, controls).
+        if (isCommentSubtree || isHarmlessAction) {
             return
         }
 
         val cleanClickedTitle = TitleMatcher.extractCardVideoTitleOnly(cardText, null, null).ifBlank {
             extractCleanTitleCandidate(cardText)
         }
-        if (cleanClickedTitle.length >= 4 &&
-            !CHROME_LABELS.contains(cleanClickedTitle.lowercase()) &&
-            !cleanClickedTitle.contains("like this video", ignoreCase = true) &&
-            !cleanClickedTitle.contains("add a comment", ignoreCase = true) &&
-            !cleanClickedTitle.contains("comment", ignoreCase = true) &&
-            !cleanClickedTitle.contains("reply", ignoreCase = true) &&
-            !cleanClickedTitle.contains("टिप्पणी", ignoreCase = true)
-        ) {
-            val match = TitleMatcher.evaluateMatch(
-                playingTitle = cleanClickedTitle,
-                taskTitle = targetTitle,
-                playingArtist = null,
-                taskAuthor = targetAuthor
-            )
+        val isNonVideoLabel = cleanClickedTitle.length < 4 ||
+            CHROME_LABELS.contains(cleanClickedTitle.lowercase()) ||
+            cleanClickedTitle.contains("like this video", ignoreCase = true) ||
+            cleanClickedTitle.contains("add a comment", ignoreCase = true) ||
+            cleanClickedTitle.contains("comment", ignoreCase = true) ||
+            cleanClickedTitle.contains("reply", ignoreCase = true) ||
+            cleanClickedTitle.contains("टिप्पणी", ignoreCase = true)
 
-            if (match == com.example.data.MatchResult.MISMATCH) {
-                WatchSessionRepository.triggerTaskIncomplete(
-                    "Task Incomplete! Aapne YouTube mein target video (\"$targetTitle\") ke bajaye doosra video (\"$cleanClickedTitle\") play kar diya."
-                )
-                return
-            }
+        if (isNonVideoLabel) {
+            // Not a video recommendation card. Never fail task on non-video clicks (e.g. comments, description, controls).
+            return
+        }
+
+        val match = TitleMatcher.evaluateMatch(
+            playingTitle = cleanClickedTitle,
+            taskTitle = targetTitle,
+            playingArtist = null,
+            taskAuthor = targetAuthor
+        )
+
+        if (match == com.example.data.MatchResult.MISMATCH) {
+            WatchSessionRepository.triggerTaskIncomplete(
+                "Task Incomplete! Aapne YouTube mein target video (\"$targetTitle\") ke bajaye doosra video (\"$cleanClickedTitle\") play kar diya."
+            )
+            return
         }
     }
 
@@ -3324,33 +3309,17 @@ class YouTubeLiveSearchService : AccessibilityService() {
     private fun isCommentsSheetOrKeyboardOpen(entries: List<UiNodeEntry>): Boolean {
         if (isSoftKeyboardVisible()) return true
         val now = System.currentTimeMillis()
-        if (wasCommentComposerOpen || wasCommentEditTextActive || hasTypedCommentText ||
-            (now - lastCommentComposerOpenTime) < 60_000L ||
-            (now - lastTypedCommentTime) < 60_000L ||
-            (now - lastCommentClickTime) < 60_000L
-        ) {
+        if ((now - lastCommentClickTime) < 3500L || (now - lastTypedCommentTime) < 3500L) {
             return true
         }
+        val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
         return entries.any { e ->
             val v = e.viewId.lowercase()
             val d = e.desc.trim().lowercase()
-            val t = e.text.trim().lowercase()
 
-            (e.isEditable && (v.contains("comment") || v.contains("reply") || v.contains("composer") || v.contains("text"))) ||
-            v.contains("comment_composer") ||
-            v.contains("comment_thread") ||
-            v.contains("comments_") ||
-            v.contains("comment_box") ||
-            v.contains("engagement_panel") ||
-            v.contains("bottom_sheet") ||
-            d == "close comments" ||
-            d == "टिप्पणियां बंद करें" ||
-            d == "comments" ||
-            t == "comments" ||
-            d.contains("add a comment") ||
-            t.contains("add a comment") ||
-            d.startsWith("reply to ") ||
-            (v.contains("close_button") && (v.contains("comment") || v.contains("engagement")))
+            (e.isEditable && (v.contains("comment") || v.contains("reply") || v.contains("composer"))) ||
+            ((d == "close comments" || d == "टिप्पणियां बंद करें" || d.contains("close comment") || (v.contains("close_button") && (v.contains("comment") || v.contains("engagement")))) &&
+             e.rect.top in (screenHeight * 0.20f).toInt()..(screenHeight * 0.95f).toInt())
         }
     }
 
@@ -3388,6 +3357,11 @@ class YouTubeLiveSearchService : AccessibilityService() {
 
             // Check if user is typing comments or comments sheet is open
             val isCommentActive = isCommentsSheetOrKeyboardOpen(entries)
+            if (!isCommentActive) {
+                wasCommentComposerOpen = false
+                wasCommentEditTextActive = false
+                hasTypedCommentText = false
+            }
 
             // 0. Check for YouTube Comment Added / Composer State / Newly Posted Comment in real-time
             if (entries.any { e -> isCommentAddedConfirmationText("${e.text} ${e.desc}".lowercase()) }) {
@@ -3507,7 +3481,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
             // 3. Check explicit player title if visible inside the top player
             val explicitPlayerTitleNode = entries.firstOrNull { e ->
                 val v = e.viewId.lowercase()
-                v.contains("player_video_title") && (e.text.length >= 4 || e.desc.length >= 4)
+                (v.contains("player_video_title") || (v.contains("title") && e.rect.top in 0..playerBottomY)) &&
+                        (e.text.length >= 4 || e.desc.length >= 4)
             }
             if (explicitPlayerTitleNode != null && !isAdPlaying) {
                 val rawPTitle = explicitPlayerTitleNode.text.ifBlank { explicitPlayerTitleNode.desc }
