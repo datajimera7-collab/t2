@@ -582,12 +582,10 @@ fun MeScreen(
                                         Button(
                                             onClick = {
                                                 viewModel.recordSharedReferralCode(myReferralCode)
-                                                val directDownloadUrl = viewModel.getEffectiveShareDownloadUrl(myReferralCode)
-                                                val shareMsg = "👑 *Watch & Earn Real Cash with Kingo King!*\n\n" +
-                                                    "🎁 Referral Code Attached: *$myReferralCode*\n" +
-                                                    "🎉 Get *+50 Free Bonus Coins* on signup!\n\n" +
-                                                    "📲 Direct 1-Click APK Download (Instant):\n$directDownloadUrl\n\n" +
-                                                    "⚡ Already installed Kingo King? Open app directly:\nkingoking://refer?code=$myReferralCode"
+                                                val shareUrl = viewModel.getEffectiveShareDownloadUrl(myReferralCode)
+                                                val shareMsg = "🎁 Join Kingo King and earn real coins watching videos!\n\n" +
+                                                    "Use my Referral Code: *$myReferralCode* to get +50 Free Bonus Coins on signup!\n\n" +
+                                                    "📲 Download App: $shareUrl"
 
                                                 val sendIntent = Intent().apply {
                                                     action = Intent.ACTION_SEND

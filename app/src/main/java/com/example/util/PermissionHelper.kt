@@ -148,32 +148,32 @@ object PermissionHelper {
     /**
      * Opens the official YouTube app cleanly via its standard Home Launcher Intent (ACTION_MAIN + CATEGORY_LAUNCHER),
      * identical to tapping the YouTube icon on the device home screen.
-     * NEVER uses external video URLs or watch?v= deep links, ensuring 0% External traffic source in YouTube Analytics.
+     * Starts YouTube completely fresh by clearing any previous activity stack.
      */
     fun openYouTubeAppHomeIntent(context: Context): Intent {
         if (isYouTubeAppInstalled(context)) {
             val launchIntent = context.packageManager.getLaunchIntentForPackage(YOUTUBE_PACKAGE)
             if (launchIntent != null) {
-                launchIntent.addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                            Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-                )
+                launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
                 return launchIntent
             }
         }
         return Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
             setPackage(YOUTUBE_PACKAGE)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
     }
 
     /**
      * Opens YouTube's internal Search Results page using Android's standard ACTION_SEARCH intent
      * with ONLY the text query (Title + Channel Name).
-     * NEVER uses any video URL or watch?v= link, so clicking the video card in search results
-     * is 100% recorded as "YouTube search" in YouTube Studio Analytics.
+     * Starts fresh by clearing previous YouTube activity tasks.
      */
     fun openYouTubeSearchResultsIntent(context: Context, query: String): Intent {
         if (isYouTubeAppInstalled(context)) {
@@ -182,8 +182,8 @@ object PermissionHelper {
                 putExtra(android.app.SearchManager.QUERY, query)
                 putExtra("query", query)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
         }
         return openYouTubeAppHomeIntent(context)
