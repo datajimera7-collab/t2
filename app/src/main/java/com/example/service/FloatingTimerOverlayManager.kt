@@ -921,64 +921,160 @@ class FloatingTimerOverlayManager(private val context: Context) {
             }
 
             val density = context.resources.displayMetrics.density
-            val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                overlayType,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT
-            ).apply {
-                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                y = (48 * density).toInt()
+            val isFullScreen = try {
+                val prefs = context.getSharedPreferences("watchearn_prefs", Context.MODE_PRIVATE)
+                prefs.getBoolean("full_screen_opening_overlay", true)
+            } catch (_: Exception) {
+                true
             }
 
-            val wrapper = FrameLayout(context)
-            val pillCard = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(
-                    (18 * density).toInt(),
-                    (10 * density).toInt(),
-                    (20 * density).toInt(),
-                    (10 * density).toInt()
-                )
-                background = GradientDrawable(
-                    GradientDrawable.Orientation.LEFT_RIGHT,
-                    intArrayOf(
-                        Color.parseColor("#F2141229"),
-                        Color.parseColor("#F21E1B3A")
+            val params = if (isFullScreen) {
+                WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    overlayType,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.FILL
+                }
+            } else {
+                WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    overlayType,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    y = (48 * density).toInt()
+                }
+            }
+
+            val wrapper = FrameLayout(context).apply {
+                if (isFullScreen) {
+                    setBackgroundColor(Color.parseColor("#E60B0F19"))
+                }
+            }
+
+            if (isFullScreen) {
+                val centerCard = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        gravity = Gravity.CENTER
+                    }
+                    setPadding(
+                        (32 * density).toInt(),
+                        (28 * density).toInt(),
+                        (32 * density).toInt(),
+                        (28 * density).toInt()
                     )
-                ).apply {
-                    cornerRadius = 28 * density
-                    setStroke((1 * density).toInt(), Color.parseColor("#80A78BFA"))
+                    background = GradientDrawable(
+                        GradientDrawable.Orientation.TOP_BOTTOM,
+                        intArrayOf(
+                            Color.parseColor("#F2141229"),
+                            Color.parseColor("#F21E1B3A")
+                        )
+                    ).apply {
+                        cornerRadius = 24 * density
+                        setStroke((1.5f * density).toInt(), Color.parseColor("#80A78BFA"))
+                    }
+                    elevation = 16 * density
                 }
-                elevation = 10 * density
-            }
 
-            val spinner = android.widget.ProgressBar(context).apply {
-                isIndeterminate = true
-                indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#38BDF8"))
-                layoutParams = LinearLayout.LayoutParams(
-                    (20 * density).toInt(),
-                    (20 * density).toInt()
-                ).apply {
-                    rightMargin = (10 * density).toInt()
+                val spinner = android.widget.ProgressBar(context).apply {
+                    isIndeterminate = true
+                    indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#38BDF8"))
+                    layoutParams = LinearLayout.LayoutParams(
+                        (36 * density).toInt(),
+                        (36 * density).toInt()
+                    ).apply {
+                        bottomMargin = (14 * density).toInt()
+                    }
                 }
-            }
-            pillCard.addView(spinner)
+                centerCard.addView(spinner)
 
-            val statusTv = TextView(context).apply {
-                text = "Opening..."
-                setTextColor(Color.WHITE)
-                textSize = 13.5f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                val statusTv = TextView(context).apply {
+                    text = "Opening..."
+                    setTextColor(Color.WHITE)
+                    textSize = 17f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                }
+                searchLoadingStatusTextView = statusTv
+                centerCard.addView(statusTv)
+
+                val subTv = TextView(context).apply {
+                    text = if (title.isNotBlank()) title.take(40) else "Loading YouTube Video..."
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 12f
+                    gravity = Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        topMargin = (6 * density).toInt()
+                    }
+                }
+                searchLoadingTitleTextView = subTv
+                centerCard.addView(subTv)
+
+                wrapper.addView(centerCard)
+            } else {
+                val pillCard = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(
+                        (18 * density).toInt(),
+                        (10 * density).toInt(),
+                        (20 * density).toInt(),
+                        (10 * density).toInt()
+                    )
+                    background = GradientDrawable(
+                        GradientDrawable.Orientation.LEFT_RIGHT,
+                        intArrayOf(
+                            Color.parseColor("#F2141229"),
+                            Color.parseColor("#F21E1B3A")
+                        )
+                    ).apply {
+                        cornerRadius = 28 * density
+                        setStroke((1 * density).toInt(), Color.parseColor("#80A78BFA"))
+                    }
+                    elevation = 10 * density
+                }
+
+                val spinner = android.widget.ProgressBar(context).apply {
+                    isIndeterminate = true
+                    indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#38BDF8"))
+                    layoutParams = LinearLayout.LayoutParams(
+                        (20 * density).toInt(),
+                        (20 * density).toInt()
+                    ).apply {
+                        rightMargin = (10 * density).toInt()
+                    }
+                }
+                pillCard.addView(spinner)
+
+                val statusTv = TextView(context).apply {
+                    text = "Opening..."
+                    setTextColor(Color.WHITE)
+                    textSize = 13.5f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                }
+                searchLoadingStatusTextView = statusTv
+                pillCard.addView(statusTv)
+                wrapper.addView(pillCard)
             }
-            searchLoadingStatusTextView = statusTv
-            pillCard.addView(statusTv)
-            wrapper.addView(pillCard)
 
             try {
                 targetWm.addView(wrapper, params)

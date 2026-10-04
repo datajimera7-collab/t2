@@ -134,6 +134,7 @@ fun AdminDashboardScreen(
     val remoteAppUpdate by viewModel.remoteAppUpdate.collectAsState()
     val updateDriveFolderUrl by viewModel.updateDriveFolderUrl.collectAsState()
     val appDownloadUrl by viewModel.appDownloadUrl.collectAsState()
+    val fullScreenOpeningOverlay by viewModel.fullScreenOpeningOverlay.collectAsState()
     val walletBalance by viewModel.walletBalance.collectAsState()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
@@ -419,6 +420,8 @@ fun AdminDashboardScreen(
                     remoteAppUpdate = remoteAppUpdate,
                     updateDriveFolderUrl = updateDriveFolderUrl,
                     appDownloadUrl = appDownloadUrl,
+                    fullScreenOpeningOverlay = fullScreenOpeningOverlay,
+                    onToggleFullScreenOpeningOverlay = { viewModel.toggleFullScreenOpeningOverlay(it) },
                     onSaveUpdateFolderUrl = { folderUrl ->
                         viewModel.saveUpdateDriveFolderUrl(folderUrl)
                         Toast.makeText(context, "Google Drive 'update' folder synced!", Toast.LENGTH_SHORT).show()
@@ -1644,6 +1647,8 @@ private fun GoogleDriveServerTabContent(
     remoteAppUpdate: com.example.data.AppUpdateInfo?,
     updateDriveFolderUrl: String,
     appDownloadUrl: String,
+    fullScreenOpeningOverlay: Boolean = true,
+    onToggleFullScreenOpeningOverlay: (Boolean) -> Unit = {},
     onSaveUpdateFolderUrl: (String) -> Unit,
     onSaveAppDownloadUrl: (String) -> Unit,
     onSaveUrl: (String) -> Unit,
@@ -1873,6 +1878,41 @@ private fun GoogleDriveServerTabContent(
                         )
                     }
                 }
+            }
+        }
+
+        // Full Screen YouTube Opening Overlay Toggle Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Full Screen YouTube Opening Overlay",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = PrimaryBlue
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "ON: YouTube open hone par 'Opening...' ka overlay poori screen par full-screen size mein aayega. OFF: Chhota bottom pill dikhega.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Switch(
+                    checked = fullScreenOpeningOverlay,
+                    onCheckedChange = { onToggleFullScreenOpeningOverlay(it) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = PrimaryBlue)
+                )
             }
         }
 

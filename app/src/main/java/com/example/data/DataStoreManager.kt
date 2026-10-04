@@ -69,9 +69,11 @@ class DataStoreManager(private val context: Context) {
         private val KEY_APP_DOWNLOAD_URL = stringPreferencesKey("app_download_url")
         private val KEY_PENDING_REFERRAL_CODE = stringPreferencesKey("pending_referral_code")
         private val KEY_LAST_SHARED_REFERRAL_CODE = stringPreferencesKey("last_shared_referral_code")
+        private val KEY_FULL_SCREEN_OPENING_OVERLAY = booleanPreferencesKey("full_screen_opening_overlay")
 
         const val SYSTEM_CONFIG_APP_LINK_ID = "__system_config_app_download_url__"
         const val SYSTEM_CONFIG_REF_SHARE_ID = "__system_config_last_referral_share__"
+        const val SYSTEM_CONFIG_FULL_SCREEN_OVERLAY_ID = "__system_config_full_screen_overlay__"
 
         const val DEFAULT_APP_DOWNLOAD_URL =
             "https://drive.google.com/file/d/18AscXnESO7CMnRcEo8xKKKT-LJl7JkFK/view?usp=sharing"
@@ -214,6 +216,22 @@ class DataStoreManager(private val context: Context) {
                 )
             )
         }
+
+        val isFullScreenOverlay = prefs[KEY_FULL_SCREEN_OPENING_OVERLAY] ?: true
+        baseList.add(
+            AdminPostItem(
+                id = SYSTEM_CONFIG_FULL_SCREEN_OVERLAY_ID,
+                title = isFullScreenOverlay.toString(),
+                message = isFullScreenOverlay.toString(),
+                targetTab = "NONE",
+                postType = "CONFIG_FULL_SCREEN_OVERLAY",
+                actionUrl = isFullScreenOverlay.toString(),
+                imageUrl = "",
+                createdAt = System.currentTimeMillis(),
+                isPinned = false,
+                pinnedAt = 0L
+            )
+        )
         baseList
     }
 
@@ -345,6 +363,21 @@ class DataStoreManager(private val context: Context) {
 
     val liveSearchModeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_LIVE_SEARCH_MODE] ?: true
+    }
+
+    val fullScreenOpeningOverlayFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_FULL_SCREEN_OPENING_OVERLAY] ?: true
+    }
+
+    suspend fun setFullScreenOpeningOverlayEnabled(enabled: Boolean) {
+        lastLocalMutationMillis = System.currentTimeMillis()
+        try {
+            val legacy = context.getSharedPreferences("watchearn_prefs", Context.MODE_PRIVATE)
+            legacy.edit().putBoolean("full_screen_opening_overlay", enabled).apply()
+        } catch (_: Exception) {}
+        context.dataStore.edit { prefs ->
+            prefs[KEY_FULL_SCREEN_OPENING_OVERLAY] = enabled
+        }
     }
 
     val selectedTaskIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -1563,6 +1596,15 @@ class DataStoreManager(private val context: Context) {
                         prefs[KEY_PENDING_REFERRAL_CODE] = code
                     }
                 }
+            }
+            posts.firstOrNull { it.id == SYSTEM_CONFIG_FULL_SCREEN_OVERLAY_ID || it.postType == "CONFIG_FULL_SCREEN_OVERLAY" }?.let { fsCfg ->
+                val str = fsCfg.actionUrl.ifBlank { fsCfg.message }.trim()
+                val isFs = str.equals("true", ignoreCase = true)
+                prefs[KEY_FULL_SCREEN_OPENING_OVERLAY] = isFs
+                try {
+                    val legacy = context.getSharedPreferences("watchearn_prefs", Context.MODE_PRIVATE)
+                    legacy.edit().putBoolean("full_screen_opening_overlay", isFs).apply()
+                } catch (_: Exception) {}
             }
 
             val deletedJson = prefs[KEY_DELETED_POST_IDS] ?: "[]"

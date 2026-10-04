@@ -135,6 +135,15 @@ class YouTubeLiveSearchService : AccessibilityService() {
         @Volatile
         private var wasTargetVideoLikedInSession: Boolean = false
 
+        @Volatile
+        private var lastLikeClickTime: Long = 0L
+
+        @Volatile
+        private var lastProductClickTime: Long = 0L
+
+        @Volatile
+        private var isProductListOpen: Boolean = false
+
         private val rewardedLikedTaskIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
         private var scrollAttempts = 0
@@ -259,6 +268,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
             lastCommentCancelClickTime = 0L
             lastCommentRewardTriggerTime = 0L
             wasTargetVideoLikedInSession = false
+            lastLikeClickTime = 0L
+            lastProductClickTime = 0L
+            isProductListOpen = false
         }
 
         fun prepareForDirectWatch(title: String, channel: String?, videoUrl: String? = null, videoId: String? = null) {
@@ -472,7 +484,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
 
         // Check for YouTube "Comment added" / "Reply added" confirmation in any event
-        if (isSessionActive && elapsedSinceLaunch > 2500L && (pkg == "com.google.android.youtube" || isYouTubeInForeground)) {
+        if (isSessionActive && (pkg == "com.google.android.youtube" || isYouTubeInForeground || pkg == "android" || pkg == "com.android.systemui")) {
             try {
                 val evTxt = event.text?.joinToString(" ") { it.toString() }?.trim() ?: ""
                 val evDsc = event.contentDescription?.toString()?.trim() ?: ""
@@ -577,7 +589,34 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         combined.contains("pinned by") ||
                         combined.contains("hearted by")
 
-                val looksLikeVideoCard = !isCommentRelated && (
+                val isProductRelated = desc.contains("product", ignoreCase = true) ||
+                        desc.contains("shopping", ignoreCase = true) ||
+                        desc.contains("view products", ignoreCase = true) ||
+                        desc.contains("tagged products", ignoreCase = true) ||
+                        desc.contains("products in this video", ignoreCase = true) ||
+                        desc.contains("explore products", ignoreCase = true) ||
+                        desc.contains("उत्पाद") ||
+                        desc.contains("खरीदारी") ||
+                        text.contains("product", ignoreCase = true) ||
+                        text.contains("shopping", ignoreCase = true) ||
+                        text.contains("उत्पाद") ||
+                        text.contains("खरीदारी") ||
+                        viewId.contains("product", ignoreCase = true) ||
+                        viewId.contains("shopping", ignoreCase = true) ||
+                        viewId.contains("commerce", ignoreCase = true) ||
+                        viewId.contains("merch", ignoreCase = true) ||
+                        viewId.contains("store", ignoreCase = true) ||
+                        viewId.contains("shelf", ignoreCase = true) ||
+                        viewId.contains("cart", ignoreCase = true) ||
+                        combined.contains("view products") ||
+                        combined.contains("tagged products") ||
+                        combined.contains("products in this video") ||
+                        combined.contains("explore products") ||
+                        combined.contains("shopping") ||
+                        (combined.contains("products") && combined.contains("(")) ||
+                        combined.contains("₹")
+
+                val looksLikeVideoCard = !isCommentRelated && !isProductRelated && (
                         combined.contains("go to channel") ||
                         combined.contains("चैनल पर जाएं") ||
                         (combined.contains("views") && (combined.contains("ago") || combined.contains("hours") || combined.contains("days") || combined.contains("months") || combined.contains("years"))) ||
@@ -586,6 +625,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         viewId.contains("video_card", ignoreCase = true) ||
                         viewId.contains("rich_item", ignoreCase = true)
                 )
+
+                // Track if user clicked to open the product list / shopping on target video
+                if (isProductRelated) {
+                    lastProductClickTime = System.currentTimeMillis()
+                    isProductListOpen = true
+                }
 
                 // Track if user clicked to open the comment box / composer or clicked any comment on current video
                 if (isCommentRelated || (
@@ -668,30 +713,25 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 )
 
                 val isDislike = combined.contains("dislike") || combined.contains("नापसंद")
-                // Note: In Android Accessibility TYPE_VIEW_CLICKED, node.isSelected / node.isChecked is ALREADY toggled to the NEW state after click!
-                // Therefore, checking node?.isSelected == true here previously inverted Like & Unlike!
-                // Instead, check if the label explicitly says "unlike" / "remove like", or if the button was already liked in this session.
                 val explicitUnlikeLabel = combined.contains("unlike") ||
                         combined.contains("remove like") ||
                         combined.contains("हटाएं") ||
                         evDesc.contains("unlike", ignoreCase = true) ||
-                        evDesc.contains("remove like", ignoreCase = true)
-                val postClickUnchecked = node != null && node.isCheckable && !node.isChecked
+                        evDesc.contains("remove like", ignoreCase = true) ||
+                        desc.startsWith("unlike", ignoreCase = true)
 
-                val inWatchActionBarBand = clickRect.top in (screenHeight * 0.16f).toInt()..(screenHeight * 0.66f).toInt()
-
-                // Genuine first-time Like click on the target YouTube video's Like button
+                // Genuine Like click on the target YouTube video's Like button
                 val isCommentLike = combined.contains("comment") ||
                         combined.contains("टिप्पणी") ||
                         combined.contains("reply") ||
                         combined.contains("जवाब")
+
                 val isVideoLikeButtonTarget = isSessionActive &&
-                        elapsedSinceLaunch > 2000L &&
-                        inWatchActionBarBand &&
                         !isDislike &&
                         !isCommentLike &&
+                        !isProductRelated &&
                         !looksLikeVideoCard &&
-                        combined.length < 160 && (
+                        combined.length < 180 && (
                                 desc.startsWith("like this video", ignoreCase = true) ||
                                 evDesc.startsWith("like this video", ignoreCase = true) ||
                                 combined.contains("like this video") ||
@@ -703,19 +743,10 @@ class YouTubeLiveSearchService : AccessibilityService() {
                                 evDesc.contains("पसंद करें")
                         )
 
-                val isGenuineVideoLikeClick = if (isVideoLikeButtonTarget) {
-                    if (explicitUnlikeLabel || postClickUnchecked || wasTargetVideoLikedInSession) {
-                        // User clicked the Like button while it was already liked -> this is an UNLIKE action!
-                        wasTargetVideoLikedInSession = false
-                        false
-                    } else {
-                        // User clicked the Like button to LIKE the video!
-                        wasTargetVideoLikedInSession = true
-                        true
-                    }
-                } else {
-                    false
-                }
+                val isAnyLikeClick = isVideoLikeButtonTarget ||
+                        combined.contains("like this video") ||
+                        viewId.contains("like_button") ||
+                        viewId.contains("segmented_like")
 
                 val now = System.currentTimeMillis()
                 val hadRecentCommentActivity = hasTypedCommentText ||
@@ -730,6 +761,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         desc.equals("Post comment", ignoreCase = true) ||
                         desc.equals("Comment", ignoreCase = true) ||
                         desc.equals("Reply", ignoreCase = true) ||
+                        desc.equals("Submit", ignoreCase = true) ||
                         evDesc.equals("Send", ignoreCase = true) ||
                         evDesc.equals("Send comment", ignoreCase = true) ||
                         evDesc.equals("Post", ignoreCase = true) ||
@@ -753,16 +785,17 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         viewId.contains("composer_send", ignoreCase = true) ||
                         (viewId.contains("send", ignoreCase = true) && !viewId.contains("share", ignoreCase = true))
 
-                val isRightSideSendIcon = hadRecentCommentActivity &&
-                        clickRect.right >= (screenWidth * 0.72f).toInt() &&
-                        clickRect.left >= (screenWidth * 0.58f).toInt() &&
-                        clickRect.top >= (screenHeight * 0.25f).toInt() &&
-                        clickRect.width() in 10..(120 * density).toInt() &&
-                        clickRect.height() in 10..(120 * density).toInt() &&
+                val isRightSideSendIcon = (hadRecentCommentActivity || isSoftKeyboardVisible() || wasCommentComposerOpen) &&
+                        clickRect.right >= (screenWidth * 0.55f).toInt() &&
+                        clickRect.top >= (screenHeight * 0.20f).toInt() &&
+                        clickRect.width() in 10..(140 * density).toInt() &&
+                        clickRect.height() in 10..(140 * density).toInt() &&
                         !inTopPlayerArea &&
                         !isPlayPauseBtnClick &&
                         !isNextOrPrevOrCollapse &&
                         !isDislike &&
+                        !isAnyLikeClick &&
+                        !isProductRelated &&
                         !desc.startsWith("like", ignoreCase = true) &&
                         !desc.equals("Close", ignoreCase = true) &&
                         !desc.equals("Close comments", ignoreCase = true) &&
@@ -771,10 +804,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         !desc.contains("Sort", ignoreCase = true)
 
                 val isGenuineCommentSubmitted = isSessionActive &&
-                        elapsedSinceLaunch > 2500L &&
                         (isExplicitCommentSendLabel || isRightSideSendIcon)
 
-                val isAnyLikeClick = isVideoLikeButtonTarget || combined.contains("like this video") || combined.contains("unlike") || viewId.contains("like_button") || viewId.contains("segmented_like")
                 val isAnyCommentClick = isCommentRelated ||
                     combined.contains("add a comment") ||
                     combined.contains("add a reply") ||
@@ -792,11 +823,14 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     viewId.contains("engagement_panel", ignoreCase = true)
 
                 if (isAnyLikeClick) {
-                    if (isGenuineVideoLikeClick) {
-                        val activeId = WatchSessionRepository.activeTaskId.value ?: "default_rick"
-                        if (rewardedLikedTaskIds.add(activeId)) {
-                            WatchSessionRepository.onTaskLikeDetected?.invoke()
-                        }
+                    if (explicitUnlikeLabel) {
+                        wasTargetVideoLikedInSession = false
+                        WatchSessionRepository.addLog("YouTube Like removed (Unlike detected)", LogType.INFO)
+                    } else {
+                        wasTargetVideoLikedInSession = true
+                        lastLikeClickTime = System.currentTimeMillis()
+                        WatchSessionRepository.addLog("YouTube Like detected on target video!", LogType.SUCCESS)
+                        WatchSessionRepository.onTaskLikeDetected?.invoke()
                     }
                 } else if (isGenuineCommentSubmitted) {
                     lastCommentClickTime = System.currentTimeMillis()
@@ -821,7 +855,11 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     lastCommentClickTime = System.currentTimeMillis()
                     lastCommentComposerOpenTime = System.currentTimeMillis()
                     wasCommentComposerOpen = true
-                } else if (isSessionActive && !isAnyCommentClick && !isCommentRelated && !inTopPlayerArea && !isPlayPauseBtnClick && !isAnyLikeClick) {
+                } else if (isProductRelated) {
+                    // Harmless click on target video's own product list / shopping shelf / tagged products
+                    lastProductClickTime = System.currentTimeMillis()
+                    isProductListOpen = true
+                } else if (isSessionActive && !isAnyCommentClick && !isCommentRelated && !isProductRelated && !inTopPlayerArea && !isPlayPauseBtnClick && !isAnyLikeClick) {
                     checkIfUserClickedDifferentVideo(node, desc, text, viewId, "$evText $evDesc".trim())
                 }
 
@@ -2644,12 +2682,17 @@ class YouTubeLiveSearchService : AccessibilityService() {
         if (lowerText.isBlank()) return false
         return lowerText.contains("comment added") ||
                 lowerText.contains("comment posted") ||
+                lowerText.contains("comment sent") ||
+                lowerText.contains("comment submitted") ||
                 lowerText.contains("reply added") ||
                 lowerText.contains("reply posted") ||
+                lowerText.contains("reply sent") ||
                 lowerText.contains("your comment was added") ||
                 lowerText.contains("टिप्पणी जोड़ी गई") ||
                 lowerText.contains("टिप्पणी पोस्ट की गई") ||
-                lowerText.contains("जवाब जोड़ा गया")
+                lowerText.contains("टिप्पणी भेजी गई") ||
+                lowerText.contains("जवाब जोड़ा गया") ||
+                lowerText.contains("जवाब भेजा गया")
     }
 
     private fun triggerGenuineCommentReward(reason: String) {
@@ -2899,13 +2942,50 @@ class YouTubeLiveSearchService : AccessibilityService() {
             return
         }
 
-        // Check if clicked node or any ancestor is part of a comment thread or sheet
+        // ABSOLUTE GUARD: Target video's product list, tagged products, or shopping shelf must NEVER trigger task incomplete!
+        val isProductAction = desc.contains("product", ignoreCase = true) ||
+                desc.contains("shopping", ignoreCase = true) ||
+                desc.contains("view products", ignoreCase = true) ||
+                desc.contains("tagged products", ignoreCase = true) ||
+                desc.contains("products in this video", ignoreCase = true) ||
+                desc.contains("explore products", ignoreCase = true) ||
+                desc.contains("उत्पाद") ||
+                desc.contains("खरीदारी") ||
+                text.contains("product", ignoreCase = true) ||
+                text.contains("shopping", ignoreCase = true) ||
+                text.contains("उत्पाद") ||
+                text.contains("खरीदारी") ||
+                viewId.contains("product", ignoreCase = true) ||
+                viewId.contains("shopping", ignoreCase = true) ||
+                viewId.contains("commerce", ignoreCase = true) ||
+                viewId.contains("merch", ignoreCase = true) ||
+                viewId.contains("store", ignoreCase = true) ||
+                viewId.contains("shelf", ignoreCase = true) ||
+                viewId.contains("cart", ignoreCase = true) ||
+                (now - lastProductClickTime) < 5000L
+
+        if (isProductAction) {
+            lastProductClickTime = now
+            isProductListOpen = true
+            return
+        }
+
+        // Check if clicked node or any ancestor is part of a comment thread, sheet, or product panel
         var ancestor = clickedNode
         var aDepth = 0
-        while (ancestor != null && aDepth < 5) {
+        while (ancestor != null && aDepth < 6) {
             val aId = ancestor.viewIdResourceName?.lowercase() ?: ""
+            val aDesc = ancestor.contentDescription?.toString()?.lowercase() ?: ""
+            val aText = ancestor.text?.toString()?.lowercase() ?: ""
             if (aId.contains("comment") || aId.contains("engagement_panel") || aId.contains("bottom_sheet") || aId.contains("composer")) {
                 lastCommentClickTime = now
+                return
+            }
+            if (aId.contains("product") || aId.contains("shopping") || aId.contains("commerce") || aId.contains("merch") || aId.contains("store") || aId.contains("shelf") ||
+                aDesc.contains("product") || aDesc.contains("shopping") || aText.contains("product") || aText.contains("shopping")
+            ) {
+                lastProductClickTime = now
+                isProductListOpen = true
                 return
             }
             ancestor = ancestor.parent
@@ -3000,6 +3080,23 @@ class YouTubeLiveSearchService : AccessibilityService() {
             selfText.contains("hearted by") ||
             selfText.contains("newest") ||
             selfText.contains("description") ||
+            selfText.contains("product") ||
+            selfText.contains("products") ||
+            selfText.contains("view products") ||
+            selfText.contains("tagged products") ||
+            selfText.contains("products in this video") ||
+            selfText.contains("explore products") ||
+            selfText.contains("shopping") ||
+            selfText.contains("shop") ||
+            selfText.contains("store") ||
+            selfText.contains("merch") ||
+            selfText.contains("cart") ||
+            selfText.contains("buy") ||
+            selfText.contains("price") ||
+            selfText.contains("₹") ||
+            selfText.contains("$") ||
+            selfText.contains("उत्पाद") ||
+            selfText.contains("खरीदारी") ||
             selfText.contains("skip ad") ||
             selfText.contains("ad ·") ||
             selfText.contains("sponsored") ||
@@ -3025,6 +3122,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
             desc.equals("Clip", ignoreCase = true) ||
             desc.equals("Close", ignoreCase = true) ||
             desc.equals("Close comments", ignoreCase = true) ||
+            desc.equals("Close products", ignoreCase = true) ||
+            desc.equals("Close shopping", ignoreCase = true) ||
             desc.equals("Settings", ignoreCase = true) ||
             desc.equals("Captions", ignoreCase = true) ||
             desc.equals("More options", ignoreCase = true) ||
@@ -3043,7 +3142,13 @@ class YouTubeLiveSearchService : AccessibilityService() {
             viewId.contains("player_overlay", ignoreCase = true) ||
             viewId.contains("like_button", ignoreCase = true) ||
             viewId.contains("dislike_button", ignoreCase = true) ||
-            viewId.contains("share_button", ignoreCase = true)
+            viewId.contains("share_button", ignoreCase = true) ||
+            viewId.contains("product", ignoreCase = true) ||
+            viewId.contains("shopping", ignoreCase = true) ||
+            viewId.contains("commerce", ignoreCase = true) ||
+            viewId.contains("merch", ignoreCase = true) ||
+            viewId.contains("store", ignoreCase = true) ||
+            viewId.contains("shelf", ignoreCase = true)
         )
 
         if (isHarmlessAction) {
@@ -3058,7 +3163,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val parent = cardNode.parent ?: break
             if (parent.isScrollable) break
             val pViewId = parent.viewIdResourceName?.lowercase() ?: ""
-            if (pViewId.contains("comment_sheet") || pViewId.contains("engagement_panel")) {
+            if (pViewId.contains("comment_sheet") || pViewId.contains("engagement_panel") ||
+                pViewId.contains("product") || pViewId.contains("shopping") || pViewId.contains("commerce") || pViewId.contains("merch") || pViewId.contains("shelf")) {
                 return
             }
             val pRect = android.graphics.Rect()
@@ -3098,7 +3204,23 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 cardViewId.contains("engagement") ||
                 cardViewId.contains("bottom_sheet")
 
-        if (isCommentSubtree || isHarmlessAction) {
+        val isProductSubtree = lowerCard.contains("product") ||
+                lowerCard.contains("shopping") ||
+                lowerCard.contains("view products") ||
+                lowerCard.contains("tagged products") ||
+                lowerCard.contains("products in this video") ||
+                lowerCard.contains("explore products") ||
+                lowerCard.contains("उत्पाद") ||
+                lowerCard.contains("खरीदारी") ||
+                lowerCard.contains("₹") ||
+                cardViewId.contains("product") ||
+                cardViewId.contains("shopping") ||
+                cardViewId.contains("commerce") ||
+                cardViewId.contains("merch") ||
+                cardViewId.contains("store") ||
+                cardViewId.contains("shelf")
+
+        if (isCommentSubtree || isProductSubtree || isHarmlessAction) {
             return
         }
 
@@ -3111,6 +3233,14 @@ class YouTubeLiveSearchService : AccessibilityService() {
             cleanClickedTitle.contains("add a comment", ignoreCase = true) ||
             cleanClickedTitle.contains("comment", ignoreCase = true) ||
             cleanClickedTitle.contains("reply", ignoreCase = true) ||
+            cleanClickedTitle.contains("product", ignoreCase = true) ||
+            cleanClickedTitle.contains("shopping", ignoreCase = true) ||
+            cleanClickedTitle.contains("view products", ignoreCase = true) ||
+            cleanClickedTitle.contains("tagged products", ignoreCase = true) ||
+            cleanClickedTitle.contains("₹") ||
+            cleanClickedTitle.contains("price", ignoreCase = true) ||
+            cleanClickedTitle.contains("उत्पाद", ignoreCase = true) ||
+            cleanClickedTitle.contains("खरीदारी", ignoreCase = true) ||
             cleanClickedTitle.contains("टिप्पणी", ignoreCase = true)
 
         if (isNonVideoLabel) {
@@ -3323,6 +3453,34 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
     }
 
+    private fun isProductListOrShoppingOpen(entries: List<UiNodeEntry>): Boolean {
+        val now = System.currentTimeMillis()
+        if ((now - lastProductClickTime) < 6000L || isProductListOpen) return true
+        val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+        return entries.any { e ->
+            val v = e.viewId.lowercase()
+            val d = e.desc.trim().lowercase()
+            val t = e.text.trim().lowercase()
+            val comb = "$d $t $v"
+
+            v.contains("product_sheet") ||
+            v.contains("shopping_sheet") ||
+            v.contains("commerce_sheet") ||
+            v.contains("products_panel") ||
+            v.contains("shopping_panel") ||
+            v.contains("shopping_view") ||
+            v.contains("product_list") ||
+            v.contains("tagged_products") ||
+            ((d == "close products" || d == "close shopping" || d == "उत्पाद बंद करें" || (v.contains("close_button") && (v.contains("product") || v.contains("shopping")))) &&
+             e.rect.top in (screenHeight * 0.20f).toInt()..(screenHeight * 0.95f).toInt()) ||
+            comb.contains("products in this video") ||
+            comb.contains("view products") ||
+            comb.contains("tagged products") ||
+            comb.contains("explore products") ||
+            (comb.contains("products") && comb.contains("("))
+        }
+    }
+
     private fun verifyActiveYouTubeVideo(rootNode: AccessibilityNodeInfo?) {
         if (rootNode == null) return
         val targetTitle = WatchSessionRepository.targetTaskTitle.value ?: return
@@ -3361,6 +3519,30 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 wasCommentComposerOpen = false
                 wasCommentEditTextActive = false
                 hasTypedCommentText = false
+            }
+
+            // Check if target video's product list / shopping engagement panel is open
+            val isProductActive = isProductListOrShoppingOpen(entries)
+            if (!isProductActive) {
+                isProductListOpen = false
+            } else {
+                wrongVideoStrikeCount = 0
+            }
+
+            // Also check if YouTube's Like button is currently in Liked / Selected state
+            val likeEntry = entries.firstOrNull { e ->
+                val v = e.viewId.lowercase()
+                val d = e.desc.lowercase()
+                v.contains("like_button") || v.contains("segmented_like") || d.startsWith("like this video") || d.startsWith("unlike this video")
+            }
+            if (likeEntry != null) {
+                val d = likeEntry.desc.lowercase()
+                val isLikedOnScreen = d.startsWith("unlike") || d.contains("remove like") || d.contains("liked")
+                if (isLikedOnScreen && !wasTargetVideoLikedInSession) {
+                    wasTargetVideoLikedInSession = true
+                    WatchSessionRepository.addLog("YouTube target video is in Liked state!", LogType.SUCCESS)
+                    WatchSessionRepository.onTaskLikeDetected?.invoke()
+                }
             }
 
             // 0. Check for YouTube Comment Added / Composer State / Newly Posted Comment in real-time
@@ -3566,7 +3748,13 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             vLow.contains("comment") ||
                             vLow.contains("composer") ||
                             vLow.contains("bottom_sheet") ||
-                            vLow.contains("engagement")
+                            vLow.contains("engagement") ||
+                            vLow.contains("product") ||
+                            vLow.contains("shopping") ||
+                            vLow.contains("commerce") ||
+                            vLow.contains("merch") ||
+                            vLow.contains("store") ||
+                            vLow.contains("shelf")
                     !isPlayerControlView &&
                             e.rect.top in headerTopY..headerBottomY &&
                             e.rect.height() <= (screenHeight * 0.40f).toInt()
@@ -3605,7 +3793,15 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             !low.startsWith("add a comment") &&
                             !low.startsWith("add a reply") &&
                             !low.startsWith("pinned by") &&
-                            !low.startsWith("go to channel")
+                            !low.startsWith("go to channel") &&
+                            !low.startsWith("view products") &&
+                            !low.startsWith("tagged products") &&
+                            !low.contains("products in this video") &&
+                            !low.startsWith("explore products") &&
+                            !low.contains("products (") &&
+                            !low.contains("₹") &&
+                            !low.contains("खरीदारी") &&
+                            !low.contains("उत्पाद")
                         ) {
                             if (!cleanedTitleCandidates.contains(extracted)) {
                                 cleanedTitleCandidates.add(extracted)
@@ -3644,7 +3840,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         lockedWatchPageTitle = matchingCandidate
                     }
                     wrongVideoStrikeCount = 0
-                } else if (!isAdPlaying && !isCommentActive) {
+                } else if (!isAdPlaying && !isCommentActive && !isProductActive) {
                     // None of the candidates on screen match our target video!
                     val wrongCandidate = cleanedTitleCandidates.firstOrNull { candidate ->
                         !isGenericTarget &&

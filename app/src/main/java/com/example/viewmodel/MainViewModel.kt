@@ -287,6 +287,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    val fullScreenOpeningOverlay: StateFlow<Boolean> = dataStoreManager.fullScreenOpeningOverlayFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun toggleFullScreenOpeningOverlay(enabled: Boolean) {
+        viewModelScope.launch {
+            dataStoreManager.setFullScreenOpeningOverlayEnabled(enabled)
+            val srvUrl = cloudServerUrl.value
+            if (srvUrl.isNotBlank()) {
+                com.example.admin.CloudDriveServerManager.syncData(
+                    serverUrl = srvUrl,
+                    dataStoreManager = dataStoreManager,
+                    pushAdminContent = true,
+                    pushLocalChanges = true,
+                    pullRemoteFirst = false
+                )
+            }
+        }
+    }
+
     // Active video URL to track
     private val _currentVideoUrl = MutableStateFlow(SampleTask.videoUrl)
     val currentVideoUrl: StateFlow<String> = _currentVideoUrl.asStateFlow()
