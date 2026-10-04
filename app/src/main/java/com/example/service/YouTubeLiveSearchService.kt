@@ -144,6 +144,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
         @Volatile
         private var isProductListOpen: Boolean = false
 
+        @Volatile
+        private var lastUserScrollTime: Long = 0L
+
         private val rewardedLikedTaskIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
         private var scrollAttempts = 0
@@ -271,6 +274,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             lastLikeClickTime = 0L
             lastProductClickTime = 0L
             isProductListOpen = false
+            lastUserScrollTime = 0L
         }
 
         fun prepareForDirectWatch(title: String, channel: String?, videoUrl: String? = null, videoId: String? = null) {
@@ -528,6 +532,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 }
                 src?.recycle()
             } catch (_: Exception) {}
+        }
+
+        if ((pkg == "com.google.android.youtube" || activeRootPkg == "com.google.android.youtube") &&
+            event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED
+        ) {
+            lastUserScrollTime = System.currentTimeMillis()
         }
 
         // Detect user interactions INSIDE YouTube ONLY (ignore clicks on our own floating overlay!)
@@ -3016,7 +3026,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             return
         }
 
-        // If user manually clicks YouTube bottom navigation tabs (Home, Subscriptions, You) or Search / Collapse while watching
+        // Check if user manually clicks YouTube bottom navigation tabs (Home, Subscriptions, You) or Search / Collapse while watching
         if (desc.equals("Home", ignoreCase = true) ||
             desc.equals("Subscriptions", ignoreCase = true) ||
             desc.equals("Library", ignoreCase = true) ||
@@ -3035,8 +3045,72 @@ class YouTubeLiveSearchService : AccessibilityService() {
             return
         }
 
-        // All other on-page clicks (scrolling, clicking comments, reading descriptions, tapping buttons)
-        // are completely safe. Real-time verification (verifyActiveYouTubeVideo) handles actual video changes!
+        val selfText = "$desc $text $eventSummary $viewId".lowercase()
+        val isHarmlessAction = selfText.contains("like") ||
+                selfText.contains("dislike") ||
+                selfText.contains("share") ||
+                selfText.contains("subscribe") ||
+                selfText.contains("comment") ||
+                selfText.contains("reply") ||
+                selfText.contains("description") ||
+                selfText.contains("...more") ||
+                selfText.contains("show more") ||
+                selfText.contains("show less") ||
+                selfText.contains("pause") ||
+                selfText.contains("play") ||
+                selfText.contains("replay") ||
+                selfText.contains("captions") ||
+                selfText.contains("settings") ||
+                selfText.contains("options for") ||
+                selfText.contains("product") ||
+                selfText.contains("shopping") ||
+                selfText.contains("commerce") ||
+                selfText.contains("merch") ||
+                selfText.contains("store") ||
+                selfText.contains("cart") ||
+                selfText.contains("price") ||
+                selfText.contains("₹")
+
+        if (isHarmlessAction) {
+            return
+        }
+
+        // Check if user clicked a video card from recommendations / feed
+        val isVideoCard = (
+            viewId.contains("video_lockup", ignoreCase = true) ||
+            viewId.contains("compact_video", ignoreCase = true) ||
+            viewId.contains("video_card", ignoreCase = true) ||
+            viewId.contains("rich_item", ignoreCase = true) ||
+            viewId.contains("grid_video", ignoreCase = true) ||
+            viewId.contains("thumbnail", ignoreCase = true) ||
+            (selfText.contains("views") && (selfText.contains("ago") || selfText.contains("min") || selfText.contains("sec") || selfText.contains(":"))) ||
+            (selfText.contains("व्यू") && (selfText.contains("पहले") || selfText.contains("मिनट"))) ||
+            selfText.contains("go to channel") ||
+            selfText.contains("चैनल पर जाएं") ||
+            selfText.contains("play video")
+        )
+
+        if (isVideoCard) {
+            val sb = StringBuilder()
+            if (eventSummary.isNotBlank()) sb.append(eventSummary).append(" ")
+            if (text.isNotBlank() && !sb.contains(text)) sb.append(text).append(" ")
+            if (desc.isNotBlank() && !sb.contains(desc)) sb.append(desc).append(" ")
+            clickedNode?.let { collectSubtreeText(it, sb, 0) }
+            val cardText = sb.toString().trim()
+            val cleanClickedTitle = TitleMatcher.extractCardVideoTitleOnly(cardText, null, null).ifBlank {
+                extractCleanTitleCandidate(cardText)
+            }
+            if (cleanClickedTitle.length >= 4 && !CHROME_LABELS.contains(cleanClickedTitle.lowercase())) {
+                val match = TitleMatcher.evaluateMatch(cleanClickedTitle, targetTitle, null, targetAuthor)
+                if (match == com.example.data.MatchResult.MISMATCH) {
+                    WatchSessionRepository.triggerTaskIncomplete(
+                        "Task Incomplete! Aapne YouTube mein target video (\"$targetTitle\") ke bajaye doosra video (\"$cleanClickedTitle\") play kar diya."
+                    )
+                    return
+                }
+            }
+        }
+
         return
     }
 
@@ -3611,7 +3685,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val onScreenChannel = channelEntry?.text?.ifBlank { channelEntry.desc }?.trim().takeIf { !it.isNullOrBlank() }
             val activeChannel = onScreenChannel ?: mediaArtist
 
-            val isUserScrolledDown = subscribeAnchor == null || subscribeAnchor.rect.top < playerBottomY
+            val notRecentlyScrolled = (now - lastUserScrollTime) > 2500L
 
             if (cleanedTitleCandidates.isNotEmpty()) {
                 val isGenericTarget = targetTitle.equals("YouTube Video Task", ignoreCase = true) ||
@@ -3629,32 +3703,20 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         lockedWatchPageTitle = matchingCandidate
                     }
                     wrongVideoStrikeCount = 0
-                } else if (!isUserScrolledDown && !isAdPlaying && !isCommentActive && !isProductActive) {
-                    // Check if MediaSession currently matches target video! If media session matches, target video is playing!
-                    val mediaTitleNow = WatchSessionRepository.currentMediaTitle.value
-                    val mediaArtistNow = WatchSessionRepository.currentMediaArtist.value
-                    val isMediaMatching = !mediaTitleNow.isNullOrBlank() &&
-                            TitleMatcher.evaluateMatch(mediaTitleNow, targetTitle, mediaArtistNow, targetAuthor) == com.example.data.MatchResult.MATCH
-
-                    if (isMediaMatching) {
-                        wrongVideoStrikeCount = 0
-                    } else {
-                        // User is at top of page, not scrolled down, comments/products not active, and candidate is mismatch
-                        val wrongCandidate = cleanedTitleCandidates.firstOrNull { candidate ->
-                            !isGenericTarget &&
-                                    TitleMatcher.evaluateMatch(candidate, targetTitle, activeChannel, targetAuthor) == com.example.data.MatchResult.MISMATCH
-                        }
-                        if (wrongCandidate != null) {
-                            wrongVideoStrikeCount++
-                            val isSessionActive = WatchSessionRepository.sessionState.value == com.example.data.SessionState.ACTIVE
-                            // Require at least 6 consecutive confirmed strikes across multiple seconds, never fail on frame 1
-                            if (isSessionActive && wrongVideoStrikeCount >= 6) {
-                                wrongVideoStrikeCount = 0
-                                WatchSessionRepository.triggerTaskIncomplete(
-                                    "Task Incomplete! Target video (\"$targetTitle\") ke bajaye doosra video (\"$wrongCandidate\") chal raha hai."
-                                )
-                                return
-                            }
+                } else if (!isAdPlaying && !isCommentActive && !isProductActive && notRecentlyScrolled) {
+                    val wrongCandidate = cleanedTitleCandidates.firstOrNull { candidate ->
+                        !isGenericTarget &&
+                                TitleMatcher.evaluateMatch(candidate, targetTitle, activeChannel, targetAuthor) == com.example.data.MatchResult.MISMATCH
+                    }
+                    if (wrongCandidate != null) {
+                        wrongVideoStrikeCount++
+                        val isSessionActive = WatchSessionRepository.sessionState.value == com.example.data.SessionState.ACTIVE
+                        if (isSessionActive && wrongVideoStrikeCount >= 2) {
+                            wrongVideoStrikeCount = 0
+                            WatchSessionRepository.triggerTaskIncomplete(
+                                "Task Incomplete! Target video (\"$targetTitle\") ke bajaye doosra video (\"$wrongCandidate\") chal raha hai."
+                            )
+                            return
                         }
                     }
                 }
