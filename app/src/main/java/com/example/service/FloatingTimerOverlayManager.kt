@@ -72,7 +72,6 @@ class FloatingTimerOverlayManager(private val context: Context) {
     private var celebrationText: TextView? = null
     private var lastCelebratedTier: WatchDurationTier? = null
     private var incompletePopupView: FrameLayout? = null
-    private var suggestedLockOverlayView: FrameLayout? = null
     private var searchLoadingOverlayView: FrameLayout? = null
     private var searchLoadingStatusTextView: TextView? = null
     private var searchLoadingTitleTextView: TextView? = null
@@ -469,9 +468,6 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 overlayRootView = root
                 isAttached = true
                 WatchSessionRepository.addLog("Side floating watch pill active on screen!", LogType.SUCCESS)
-
-                // Attach Suggested Videos Touch Barrier / Shield over bottom suggested videos area
-                attachSuggestedVideosLockShield()
             } catch (e: Exception) {
                 isAttached = false
                 WatchSessionRepository.addLog("Failed to add floating timer: ${e.message}", LogType.ERROR)
@@ -1207,137 +1203,10 @@ class FloatingTimerOverlayManager(private val context: Context) {
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun attachSuggestedVideosLockShield() {
-        if (!Settings.canDrawOverlays(context) || WatchSessionRepository.isAppInForeground) {
-            return
-        }
-        if (suggestedLockOverlayView != null) {
-            return
-        }
-
-        try {
-            val screenHeight = context.resources.displayMetrics.heightPixels.coerceAtLeast(800)
-            val shieldHeight = (screenHeight * 0.44f).toInt().coerceAtLeast(200)
-
-            val shieldParams = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                shieldHeight,
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                } else {
-                    @Suppress("DEPRECATION")
-                    WindowManager.LayoutParams.TYPE_PHONE
-                },
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT
-            ).apply {
-                gravity = Gravity.BOTTOM
-                x = 0
-                y = 0
-            }
-
-            val shieldRoot = FrameLayout(context).apply {
-                val bg = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    setColor(Color.parseColor("#F50A0F1D")) // Deep dark sleek obsidian
-                    setStroke((1.5f * density).toInt(), Color.parseColor("#F59E0B")) // Gold top separator
-                }
-                background = bg
-
-                // Intercept and absorb all touches/scrolls on the bottom suggested videos area!
-                setOnTouchListener { _, event ->
-                    if (event.action == MotionEvent.ACTION_DOWN) {
-                        try {
-                            android.widget.Toast.makeText(
-                                context,
-                                "🔒 Suggested videos locked during task. Please watch target video above!",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        } catch (_: Exception) {}
-                    }
-                    true
-                }
-            }
-
-            val contentLayout = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                val padH = (20 * density).toInt()
-                val padV = (16 * density).toInt()
-                setPadding(padH, padV, padH, padV)
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
-            }
-
-            // Lock icon
-            val lockIcon = TextView(context).apply {
-                text = "🔒"
-                textSize = 26f
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = (6 * density).toInt()
-                }
-            }
-            contentLayout.addView(lockIcon)
-
-            // Title
-            val lockTitle = TextView(context).apply {
-                text = "Suggested Videos Locked 🔒"
-                setTextColor(Color.WHITE)
-                textSize = 14.5f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = (4 * density).toInt()
-                }
-            }
-            contentLayout.addView(lockTitle)
-
-            // Subtitle explanation
-            val lockSub = TextView(context).apply {
-                text = "Task is in progress! Please watch target video above.\n(Likes & Comments are active above)"
-                setTextColor(Color.parseColor("#94A3B8"))
-                textSize = 11.5f
-                gravity = Gravity.CENTER
-                setLineSpacing(2 * density, 1f)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-            contentLayout.addView(lockSub)
-
-            shieldRoot.addView(contentLayout)
-
-            windowManager.addView(shieldRoot, shieldParams)
-            globalAttachedViews.add(shieldRoot)
-            suggestedLockOverlayView = shieldRoot
-            WatchSessionRepository.addLog("Suggested videos shield active on screen (locked).", LogType.INFO)
-        } catch (e: Exception) {
-            WatchSessionRepository.addLog("Could not attach suggested videos shield: ${e.message}", LogType.WARNING)
-        }
-    }
-
     fun hideOverlay() {
         runOnMain {
             hideSearchLoadingOverlay()
             removeAllGlobalViews(windowManager)
-            suggestedLockOverlayView?.let { shield ->
-                try {
-                    windowManager.removeView(shield)
-                } catch (_: Exception) {}
-            }
-            suggestedLockOverlayView = null
             overlayRootView?.let { root ->
                 try {
                     windowManager.removeView(root)

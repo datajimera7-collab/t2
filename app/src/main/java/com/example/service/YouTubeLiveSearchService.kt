@@ -818,7 +818,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     desc.contains("comment", ignoreCase = true) ||
                     text.contains("comment", ignoreCase = true) ||
                     viewId.contains("comment_composer", ignoreCase = true) ||
-                    viewId.contains("comment_box", ignoreCase = true)
+                    viewId.contains("comment_box", ignoreCase = true) ||
+                    viewId.contains("bottom_sheet", ignoreCase = true) ||
+                    viewId.contains("engagement_panel", ignoreCase = true)
 
                 if (isAnyLikeClick) {
                     if (explicitUnlikeLabel) {
@@ -2905,6 +2907,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
         val targetTitle = WatchSessionRepository.targetTaskTitle.value ?: return
         val targetAuthor = WatchSessionRepository.targetTaskAuthor.value
 
+        // ABSOLUTE GUARD: Commenting, posting comment, typing, reading comments, scrolling, or interacting with the watch page must NEVER trigger task incomplete!
         val now = System.currentTimeMillis()
         val isCommentOrSendAction = desc.equals("Send", ignoreCase = true) ||
                 desc.equals("Send comment", ignoreCase = true) ||
@@ -2928,7 +2931,11 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 viewId.contains("send_button", ignoreCase = true) ||
                 viewId.contains("post_button", ignoreCase = true) ||
                 viewId.contains("comment_send", ignoreCase = true) ||
-                isSoftKeyboardVisible()
+                viewId.contains("bottom_sheet", ignoreCase = true) ||
+                viewId.contains("engagement_panel", ignoreCase = true) ||
+                isSoftKeyboardVisible() ||
+                (now - lastCommentClickTime) < 4000L ||
+                (now - lastTypedCommentTime) < 4000L
 
         if (isCommentOrSendAction) {
             lastCommentClickTime = now
@@ -2963,14 +2970,14 @@ class YouTubeLiveSearchService : AccessibilityService() {
             return
         }
 
-        // Check if clicked node or any ancestor is part of a comment thread
+        // Check if clicked node or any ancestor is part of a comment thread, sheet, or product panel
         var ancestor = clickedNode
         var aDepth = 0
         while (ancestor != null && aDepth < 6) {
             val aId = ancestor.viewIdResourceName?.lowercase() ?: ""
             val aDesc = ancestor.contentDescription?.toString()?.lowercase() ?: ""
             val aText = ancestor.text?.toString()?.lowercase() ?: ""
-            if (aId.contains("comment") || aId.contains("composer") || aDesc.contains("comment") || aText.contains("comment") || aDesc.contains("टिप्पणी") || aText.contains("टिप्पणी")) {
+            if (aId.contains("comment") || aId.contains("engagement_panel") || aId.contains("bottom_sheet") || aId.contains("composer")) {
                 lastCommentClickTime = now
                 return
             }
@@ -3028,31 +3035,25 @@ class YouTubeLiveSearchService : AccessibilityService() {
             return
         }
 
-        // STRICT SUGGESTED/RECOMMENDED VIDEO CARD TAP DETECTION:
-        // If user taps any recommended/suggested video item in the feed while target video is playing,
-        // detect the card's title and trigger task incomplete immediately!
+        // STRICT VIDEO CARD TAP DETECTION:
+        // If user taps a recommended/related video card in the feed while target video is playing,
+        // detect the card's title and trigger task incomplete if it's a different video!
         try {
             val sb = StringBuilder()
             collectSubtreeText(clickedNode, sb, 0)
-            val parentNode = clickedNode?.parent
-            if (parentNode != null && parentNode.childCount in 1..10) {
-                collectSubtreeText(parentNode, sb, 0)
-            }
             val fullClickText = "$text $desc $eventSummary ${sb.toString()}".trim()
             val lowerClick = fullClickText.lowercase()
 
-            val hasCardSignals = viewId.contains("video", ignoreCase = true) ||
-                    viewId.contains("lockup", ignoreCase = true) ||
-                    viewId.contains("compact", ignoreCase = true) ||
-                    viewId.contains("rich", ignoreCase = true) ||
-                    viewId.contains("thumbnail", ignoreCase = true) ||
+            val hasCardSignals = viewId.contains("video_lockup") ||
+                    viewId.contains("compact_video") ||
+                    viewId.contains("video_card") ||
+                    viewId.contains("rich_item") ||
+                    viewId.contains("thumbnail") ||
                     Regex("\\b\\d{1,2}:\\d{2}\\b").containsMatchIn(lowerClick) ||
                     lowerClick.contains("views") ||
                     lowerClick.contains("ago") ||
                     lowerClick.contains("पहले") ||
-                    lowerClick.contains("बार देखा गया") ||
-                    lowerClick.contains("go to channel") ||
-                    lowerClick.contains("चैनल पर जाएं")
+                    lowerClick.contains("बार देखा गया")
 
             val isActionOrMeta = desc.startsWith("like", ignoreCase = true) ||
                     desc.startsWith("unlike", ignoreCase = true) ||
@@ -3064,23 +3065,19 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     desc.startsWith("options for", ignoreCase = true) ||
                     desc.contains("more", ignoreCase = true) ||
                     desc.contains("description", ignoreCase = true) ||
-                    desc.contains("comment", ignoreCase = true) ||
                     text.startsWith("like", ignoreCase = true) ||
                     text.startsWith("share", ignoreCase = true) ||
                     text.startsWith("subscribe", ignoreCase = true) ||
                     text.contains("more", ignoreCase = true) ||
-                    text.contains("description", ignoreCase = true) ||
-                    text.contains("comment", ignoreCase = true)
+                    text.contains("description", ignoreCase = true)
 
             if (hasCardSignals && !isActionOrMeta) {
-                val extractedTitle = TitleMatcher.extractCardVideoTitleOnly(fullClickText, targetAuthor).ifBlank {
-                    extractCleanTitleCandidate(fullClickText)
-                }
+                val extractedTitle = extractCleanTitleCandidate(fullClickText)
                 if (extractedTitle.length >= 4) {
                     val match = TitleMatcher.evaluateMatch(extractedTitle, targetTitle, null, targetAuthor)
                     if (match == com.example.data.MatchResult.MISMATCH) {
                         WatchSessionRepository.triggerTaskIncomplete(
-                            "Task Incomplete! Aapne target video chod kar suggested video (\"$extractedTitle\") play karne ke liye click kar diya."
+                            "Task Incomplete! Aapne target video chod kar doosra video (\"$extractedTitle\") play karne ke liye click kar diya."
                         )
                         return
                     }
@@ -3266,6 +3263,10 @@ class YouTubeLiveSearchService : AccessibilityService() {
 
     private fun isCommentsSheetOrKeyboardOpen(entries: List<UiNodeEntry>): Boolean {
         if (isSoftKeyboardVisible()) return true
+        val now = System.currentTimeMillis()
+        if ((now - lastCommentClickTime) < 8000L || (now - lastTypedCommentTime) < 8000L || (now - lastCommentComposerOpenTime) < 15000L) {
+            return true
+        }
         val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
         return entries.any { e ->
             val v = e.viewId.lowercase()
@@ -3276,8 +3277,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
             v.contains("comment_sheet") ||
             v.contains("comment_composer") ||
             v.contains("comment_box") ||
-            (v.contains("comment") && (t.contains("comment") || d.contains("comment") || t.contains("टिप्पणी"))) ||
-            ((d == "close comments" || d == "टिप्पणियां बंद करें" || d.contains("close comment")) &&
+            (v.contains("engagement_panel") && (t.contains("comment") || d.contains("comment") || t.contains("टिप्पणी"))) ||
+            ((d == "close comments" || d == "टिप्पणियां बंद करें" || d.contains("close comment") || (d == "close" && v.contains("close_button"))) &&
              e.rect.top in (screenHeight * 0.15f).toInt()..(screenHeight * 0.95f).toInt()) ||
             t.contains("add a comment") ||
             t.contains("add a reply") ||
@@ -3565,19 +3566,30 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val sortedHeaderEntries = entries
                 .filter { e ->
                     val vLow = e.viewId.lowercase()
-                    val isPlayerControlView = vLow.contains("player_control") ||
+                    val isPlayerControlView = vLow.contains("player") ||
                             vLow.contains("time_bar") ||
                             vLow.contains("scrubber") ||
+                            vLow.contains("control") ||
                             vLow.contains("overlay") ||
+                            vLow.contains("inline") ||
                             vLow.contains("autonav") ||
                             vLow.contains("seek") ||
+                            vLow.contains("chapter") ||
+                            vLow.contains("caption") ||
+                            vLow.contains("subtitle") ||
                             vLow.contains("live_chat") ||
                             vLow.contains("tooltip") ||
+                            vLow.contains("hint") ||
                             vLow.contains("comment") ||
                             vLow.contains("composer") ||
+                            vLow.contains("bottom_sheet") ||
+                            vLow.contains("engagement") ||
                             vLow.contains("product") ||
                             vLow.contains("shopping") ||
-                            vLow.contains("commerce")
+                            vLow.contains("commerce") ||
+                            vLow.contains("merch") ||
+                            vLow.contains("store") ||
+                            vLow.contains("shelf")
                     !isPlayerControlView &&
                             e.rect.top in headerTopY..headerBottomY &&
                             e.rect.height() <= (screenHeight * 0.40f).toInt()
