@@ -128,25 +128,26 @@ class DataStoreManager(private val context: Context) {
 
         /**
          * Transforms any Google Drive link or download URL into a DIRECT 1-Click download link
-         * with the 6-digit referral key attached as a query parameter.
+         * that immediately triggers the raw APK download without showing an intermediate browser preview page.
          */
         fun toDirectDownloadUrl(raw: String?, referralCode: String? = null): String {
             val cleanUrl = normalizeAppDownloadUrl(raw)
             val cleanRef = referralCode?.trim()?.takeIf { it.length == 6 && it.all { ch -> ch.isDigit() } }
-            val refQuery = if (!cleanRef.isNullOrBlank()) "ref=$cleanRef" else null
 
             // 1. Check for Google Drive file ID
             val driveFileIdRegex = Regex("""(?:/file/d/|/d/|[?&]id=)([a-zA-Z0-9_-]{18,60})""")
             val driveMatch = driveFileIdRegex.find(cleanUrl)
             if (driveMatch != null) {
                 val fileId = driveMatch.groupValues[1]
-                val base = "https://drive.usercontent.google.com/download?id=$fileId&export=download&confirm=t"
-                return if (refQuery != null) "$base&$refQuery" else base
+                val base = "https://drive.google.com/uc?export=download&id=$fileId&confirm=t"
+                return if (cleanRef != null) "$base#ref=$cleanRef" else base
             }
 
             // 2. Direct Web or HTTP link
-            return if (refQuery != null) {
-                if (cleanUrl.contains("?")) "$cleanUrl&$refQuery" else "$cleanUrl?$refQuery"
+            return if (cleanRef != null) {
+                if (cleanUrl.contains("#")) "$cleanUrl&ref=$cleanRef"
+                else if (cleanUrl.contains("?")) "$cleanUrl&ref=$cleanRef"
+                else "$cleanUrl#ref=$cleanRef"
             } else {
                 cleanUrl
             }

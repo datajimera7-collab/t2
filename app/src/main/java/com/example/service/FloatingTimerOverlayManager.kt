@@ -928,6 +928,7 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 true
             }
 
+            val screenWidth = context.resources.displayMetrics.widthPixels.coerceAtLeast(400)
             val params = if (isFullScreen) {
                 WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -936,8 +937,9 @@ class FloatingTimerOverlayManager(private val context: Context) {
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSLUCENT
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.OPAQUE
                 ).apply {
                     gravity = Gravity.FILL
                 }
@@ -959,45 +961,74 @@ class FloatingTimerOverlayManager(private val context: Context) {
 
             val wrapper = FrameLayout(context).apply {
                 if (isFullScreen) {
-                    setBackgroundColor(Color.parseColor("#E60B0F19"))
+                    // 100% Solid Pitch Dark - ZERO visibility of YouTube underneath!
+                    setBackgroundColor(Color.parseColor("#FF040711"))
                 }
             }
 
             if (isFullScreen) {
+                val cardWidth = (screenWidth * 0.90f).toInt().coerceAtMost((360 * density).toInt())
                 val centerCard = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
                     layoutParams = FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        cardWidth,
                         FrameLayout.LayoutParams.WRAP_CONTENT
                     ).apply {
                         gravity = Gravity.CENTER
                     }
                     setPadding(
-                        (32 * density).toInt(),
-                        (28 * density).toInt(),
-                        (32 * density).toInt(),
-                        (28 * density).toInt()
+                        (24 * density).toInt(),
+                        (26 * density).toInt(),
+                        (24 * density).toInt(),
+                        (24 * density).toInt()
                     )
                     background = GradientDrawable(
                         GradientDrawable.Orientation.TOP_BOTTOM,
                         intArrayOf(
-                            Color.parseColor("#F2141229"),
-                            Color.parseColor("#F21E1B3A")
+                            Color.parseColor("#FF0F172A"),
+                            Color.parseColor("#FF090D18")
                         )
                     ).apply {
                         cornerRadius = 24 * density
-                        setStroke((1.5f * density).toInt(), Color.parseColor("#80A78BFA"))
+                        setStroke((1.2f * density).toInt(), Color.parseColor("#1E293B"))
                     }
-                    elevation = 16 * density
+                    elevation = 24 * density
                 }
+
+                // Sleek brand badge
+                val brandBadge = TextView(context).apply {
+                    text = "👑 KINGO KING • VIDEO REWARD"
+                    setTextColor(Color.parseColor("#FBBF24"))
+                    textSize = 10f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setPadding(
+                        (14 * density).toInt(),
+                        (5 * density).toInt(),
+                        (14 * density).toInt(),
+                        (5 * density).toInt()
+                    )
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor("#1C1917"))
+                        cornerRadius = 14 * density
+                        setStroke((1 * density).toInt(), Color.parseColor("#78350F"))
+                    }
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        bottomMargin = (16 * density).toInt()
+                    }
+                }
+                centerCard.addView(brandBadge)
 
                 val spinner = android.widget.ProgressBar(context).apply {
                     isIndeterminate = true
-                    indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#38BDF8"))
+                    indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#F59E0B"))
                     layoutParams = LinearLayout.LayoutParams(
-                        (36 * density).toInt(),
-                        (36 * density).toInt()
+                        (38 * density).toInt(),
+                        (38 * density).toInt()
                     ).apply {
                         bottomMargin = (14 * density).toInt()
                     }
@@ -1005,7 +1036,7 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 centerCard.addView(spinner)
 
                 val statusTv = TextView(context).apply {
-                    text = "Opening..."
+                    text = "Opening Target Video"
                     setTextColor(Color.WHITE)
                     textSize = 17f
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -1014,20 +1045,85 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 searchLoadingStatusTextView = statusTv
                 centerCard.addView(statusTv)
 
-                val subTv = TextView(context).apply {
-                    text = if (title.isNotBlank()) title.take(40) else "Loading YouTube Video..."
+                val subtitleTv = TextView(context).apply {
+                    text = "Verifying player & setting up reward timer..."
                     setTextColor(Color.parseColor("#94A3B8"))
-                    textSize = 12f
+                    textSize = 11.5f
                     gravity = Gravity.CENTER
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
                     ).apply {
-                        topMargin = (6 * density).toInt()
+                        topMargin = (3 * density).toInt()
                     }
                 }
+                centerCard.addView(subtitleTv)
+
+                // Dedicated, clean title card
+                val titleBox = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    setPadding(
+                        (14 * density).toInt(),
+                        (12 * density).toInt(),
+                        (14 * density).toInt(),
+                        (12 * density).toInt()
+                    )
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor("#060A12"))
+                        cornerRadius = 14 * density
+                        setStroke((1 * density).toInt(), Color.parseColor("#1E293B"))
+                    }
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        topMargin = (16 * density).toInt()
+                    }
+                }
+
+                val subTv = TextView(context).apply {
+                    text = if (title.isNotBlank()) "🎬 ${title.take(70)}" else "🎬 Preparing YouTube video player..."
+                    setTextColor(Color.parseColor("#F1F5F9"))
+                    textSize = 12.5f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
                 searchLoadingTitleTextView = subTv
-                centerCard.addView(subTv)
+                titleBox.addView(subTv)
+
+                if (channel.isNotBlank()) {
+                    val channelTv = TextView(context).apply {
+                        text = "📺 Channel: $channel"
+                        setTextColor(Color.parseColor("#38BDF8"))
+                        textSize = 11.5f
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            topMargin = (4 * density).toInt()
+                        }
+                    }
+                    titleBox.addView(channelTv)
+                }
+                centerCard.addView(titleBox)
+
+                val footerTv = TextView(context).apply {
+                    text = "🪙 Coins start tracking automatically once playback begins"
+                    setTextColor(Color.parseColor("#FCD34D"))
+                    textSize = 11f
+                    gravity = Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        topMargin = (16 * density).toInt()
+                    }
+                }
+                centerCard.addView(footerTv)
 
                 wrapper.addView(centerCard)
             } else {

@@ -2907,7 +2907,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
         val targetTitle = WatchSessionRepository.targetTaskTitle.value ?: return
         val targetAuthor = WatchSessionRepository.targetTaskAuthor.value
 
-        // ABSOLUTE GUARD: Commenting, posting comment, typing, or reading comments must NEVER trigger task incomplete!
+        // ABSOLUTE GUARD: Commenting, posting comment, typing, reading comments, scrolling, or interacting with the watch page must NEVER trigger task incomplete!
         val now = System.currentTimeMillis()
         val isCommentOrSendAction = desc.equals("Send", ignoreCase = true) ||
                 desc.equals("Send comment", ignoreCase = true) ||
@@ -2934,8 +2934,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 viewId.contains("bottom_sheet", ignoreCase = true) ||
                 viewId.contains("engagement_panel", ignoreCase = true) ||
                 isSoftKeyboardVisible() ||
-                (now - lastCommentClickTime) < 3000L ||
-                (now - lastTypedCommentTime) < 3000L
+                (now - lastCommentClickTime) < 4000L ||
+                (now - lastTypedCommentTime) < 4000L
 
         if (isCommentOrSendAction) {
             lastCommentClickTime = now
@@ -2992,6 +2992,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             aDepth++
         }
 
+        // ONLY fail task if user explicitly pressed player control to skip video, or navigated away from Watch screen
         if (desc.equals("Next video", ignoreCase = true) ||
             desc.equals("Previous video", ignoreCase = true) ||
             desc.contains("अगला वीडियो") ||
@@ -3034,233 +3035,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
             return
         }
 
-        val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
-        val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
-        val density = resources.displayMetrics.density
-        val statusBarHeight = getStatusBarHeight()
-        val playerBottomY = statusBarHeight + ((screenWidth * 9) / 16)
-        val topPlayerMaxBottom = (playerBottomY + (48 * density).toInt()).coerceAtMost((screenHeight * 0.44f).toInt())
-        val clickRect = android.graphics.Rect()
-        clickedNode?.getBoundsInScreen(clickRect)
-
-        // Ignore clicks with invalid bounds or clicks inside the top video player area
-        if (clickRect.width() <= 0 ||
-            clickRect.height() <= 0 ||
-            (clickRect.bottom in 1..topPlayerMaxBottom && clickRect.top in 0..topPlayerMaxBottom)
-        ) {
-            return
-        }
-
-        // Check if the directly clicked element itself is a harmless watch header, player setting, pause/play, like, or comment control
-        val selfText = "$desc $text $eventSummary $viewId".lowercase()
-        val looksLikeCard = selfText.contains("views") ||
-                selfText.contains("go to channel") ||
-                selfText.contains("चैनल पर जाएं") ||
-                selfText.contains("play video") ||
-                viewId.contains("video_lockup", ignoreCase = true) ||
-                viewId.contains("compact_video", ignoreCase = true) ||
-                viewId.contains("video_card", ignoreCase = true) ||
-                viewId.contains("rich_item", ignoreCase = true)
-
-        val isHarmlessAction = !looksLikeCard && (
-            isSoftKeyboardVisible() ||
-            selfText.contains("like") ||
-            selfText.contains("dislike") ||
-            selfText.contains("पसंद") ||
-            selfText.contains("नापसंद") ||
-            selfText.contains("comment") ||
-            selfText.contains("टिप्पणी") ||
-            selfText.contains("टिप्पणियाँ") ||
-            selfText.contains("reply") ||
-            selfText.contains("replies") ||
-            selfText.contains("जवाब") ||
-            selfText.contains("add a comment") ||
-            selfText.contains("add a reply") ||
-            selfText.contains("pinned by") ||
-            selfText.contains("hearted by") ||
-            selfText.contains("newest") ||
-            selfText.contains("description") ||
-            selfText.contains("product") ||
-            selfText.contains("products") ||
-            selfText.contains("view products") ||
-            selfText.contains("tagged products") ||
-            selfText.contains("products in this video") ||
-            selfText.contains("explore products") ||
-            selfText.contains("shopping") ||
-            selfText.contains("shop") ||
-            selfText.contains("store") ||
-            selfText.contains("merch") ||
-            selfText.contains("cart") ||
-            selfText.contains("buy") ||
-            selfText.contains("price") ||
-            selfText.contains("₹") ||
-            selfText.contains("$") ||
-            selfText.contains("उत्पाद") ||
-            selfText.contains("खरीदारी") ||
-            selfText.contains("skip ad") ||
-            selfText.contains("ad ·") ||
-            selfText.contains("sponsored") ||
-            desc.equals("Pause video", ignoreCase = true) ||
-            desc.equals("Play video", ignoreCase = true) ||
-            desc.equals("Replay video", ignoreCase = true) ||
-            desc.equals("Pause", ignoreCase = true) ||
-            desc.equals("Play", ignoreCase = true) ||
-            desc.equals("Replay", ignoreCase = true) ||
-            desc.equals("Video player", ignoreCase = true) ||
-            desc.contains("वीडियो रोकें") ||
-            desc.contains("वीडियो चलाएं") ||
-            desc.contains("फिर से चलाएं") ||
-            desc.equals("Subscribe", ignoreCase = true) ||
-            desc.equals("Subscribed", ignoreCase = true) ||
-            desc.startsWith("Subscribe to", ignoreCase = true) ||
-            desc.equals("Share", ignoreCase = true) ||
-            desc.startsWith("Share ", ignoreCase = true) ||
-            desc.equals("Download", ignoreCase = true) ||
-            desc.startsWith("Download ", ignoreCase = true) ||
-            desc.equals("Remix", ignoreCase = true) ||
-            desc.equals("Save", ignoreCase = true) ||
-            desc.equals("Clip", ignoreCase = true) ||
-            desc.equals("Close", ignoreCase = true) ||
-            desc.equals("Close comments", ignoreCase = true) ||
-            desc.equals("Close products", ignoreCase = true) ||
-            desc.equals("Close shopping", ignoreCase = true) ||
-            desc.equals("Settings", ignoreCase = true) ||
-            desc.equals("Captions", ignoreCase = true) ||
-            desc.equals("More options", ignoreCase = true) ||
-            desc.equals("Hide controls", ignoreCase = true) ||
-            desc.equals("Show controls", ignoreCase = true) ||
-            desc.equals("Enter full screen", ignoreCase = true) ||
-            desc.equals("Exit full screen", ignoreCase = true) ||
-            desc.equals("Full screen", ignoreCase = true) ||
-            desc.equals("Expand description", ignoreCase = true) ||
-            desc.equals("Collapse description", ignoreCase = true) ||
-            text.equals("...more", ignoreCase = true) ||
-            text.equals("Show more", ignoreCase = true) ||
-            text.equals("Show less", ignoreCase = true) ||
-            viewId.contains("play_pause", ignoreCase = true) ||
-            viewId.contains("player_control", ignoreCase = true) ||
-            viewId.contains("player_overlay", ignoreCase = true) ||
-            viewId.contains("like_button", ignoreCase = true) ||
-            viewId.contains("dislike_button", ignoreCase = true) ||
-            viewId.contains("share_button", ignoreCase = true) ||
-            viewId.contains("product", ignoreCase = true) ||
-            viewId.contains("shopping", ignoreCase = true) ||
-            viewId.contains("commerce", ignoreCase = true) ||
-            viewId.contains("merch", ignoreCase = true) ||
-            viewId.contains("store", ignoreCase = true) ||
-            viewId.contains("shelf", ignoreCase = true)
-        )
-
-        if (isHarmlessAction) {
-            return
-        }
-
-        // Climb up to 4 parent levels to reach the full video card container in the feed below the watch header,
-        // but NEVER climb into a scrollable container (RecyclerView / ScrollView) or above the feed area!
-        var cardNode: AccessibilityNodeInfo? = clickedNode
-        var depth = 0
-        while (cardNode != null && depth < 4) {
-            val parent = cardNode.parent ?: break
-            if (parent.isScrollable) break
-            val pViewId = parent.viewIdResourceName?.lowercase() ?: ""
-            if (pViewId.contains("comment_sheet") || pViewId.contains("engagement_panel") ||
-                pViewId.contains("product") || pViewId.contains("shopping") || pViewId.contains("commerce") || pViewId.contains("merch") || pViewId.contains("shelf")) {
-                return
-            }
-            val pRect = android.graphics.Rect()
-            parent.getBoundsInScreen(pRect)
-            if (pRect.top >= playerBottomY) {
-                cardNode = parent
-            } else {
-                break
-            }
-            depth++
-        }
-
-        val cardRect = android.graphics.Rect()
-        if (cardNode != null) {
-            cardNode.getBoundsInScreen(cardRect)
-        } else {
-            cardRect.set(clickRect)
-        }
-
-        val sb = StringBuilder()
-        if (eventSummary.isNotBlank()) sb.append(eventSummary).append(" ")
-        if (text.isNotBlank() && !sb.contains(text)) sb.append(text).append(" ")
-        if (desc.isNotBlank() && !sb.contains(desc)) sb.append(desc).append(" ")
-        if (cardNode != null) {
-            collectSubtreeText(cardNode, sb, 0)
-        }
-
-        val cardText = sb.toString().trim()
-        val lowerCard = cardText.lowercase()
-        val cardViewId = (cardNode?.viewIdResourceName ?: viewId).lowercase()
-
-        val isCommentSubtree = lowerCard.contains("comment") ||
-                lowerCard.contains("reply") ||
-                lowerCard.contains("टिप्पणी") ||
-                cardViewId.contains("comment") ||
-                cardViewId.contains("composer") ||
-                cardViewId.contains("engagement") ||
-                cardViewId.contains("bottom_sheet")
-
-        val isProductSubtree = lowerCard.contains("product") ||
-                lowerCard.contains("shopping") ||
-                lowerCard.contains("view products") ||
-                lowerCard.contains("tagged products") ||
-                lowerCard.contains("products in this video") ||
-                lowerCard.contains("explore products") ||
-                lowerCard.contains("उत्पाद") ||
-                lowerCard.contains("खरीदारी") ||
-                lowerCard.contains("₹") ||
-                cardViewId.contains("product") ||
-                cardViewId.contains("shopping") ||
-                cardViewId.contains("commerce") ||
-                cardViewId.contains("merch") ||
-                cardViewId.contains("store") ||
-                cardViewId.contains("shelf")
-
-        if (isCommentSubtree || isProductSubtree || isHarmlessAction) {
-            return
-        }
-
-        val cleanClickedTitle = TitleMatcher.extractCardVideoTitleOnly(cardText, null, null).ifBlank {
-            extractCleanTitleCandidate(cardText)
-        }
-        val isNonVideoLabel = cleanClickedTitle.length < 4 ||
-            CHROME_LABELS.contains(cleanClickedTitle.lowercase()) ||
-            cleanClickedTitle.contains("like this video", ignoreCase = true) ||
-            cleanClickedTitle.contains("add a comment", ignoreCase = true) ||
-            cleanClickedTitle.contains("comment", ignoreCase = true) ||
-            cleanClickedTitle.contains("reply", ignoreCase = true) ||
-            cleanClickedTitle.contains("product", ignoreCase = true) ||
-            cleanClickedTitle.contains("shopping", ignoreCase = true) ||
-            cleanClickedTitle.contains("view products", ignoreCase = true) ||
-            cleanClickedTitle.contains("tagged products", ignoreCase = true) ||
-            cleanClickedTitle.contains("₹") ||
-            cleanClickedTitle.contains("price", ignoreCase = true) ||
-            cleanClickedTitle.contains("उत्पाद", ignoreCase = true) ||
-            cleanClickedTitle.contains("खरीदारी", ignoreCase = true) ||
-            cleanClickedTitle.contains("टिप्पणी", ignoreCase = true)
-
-        if (isNonVideoLabel) {
-            // Not a video recommendation card. Never fail task on non-video clicks (e.g. comments, description, controls).
-            return
-        }
-
-        val match = TitleMatcher.evaluateMatch(
-            playingTitle = cleanClickedTitle,
-            taskTitle = targetTitle,
-            playingArtist = null,
-            taskAuthor = targetAuthor
-        )
-
-        if (match == com.example.data.MatchResult.MISMATCH) {
-            WatchSessionRepository.triggerTaskIncomplete(
-                "Task Incomplete! Aapne YouTube mein target video (\"$targetTitle\") ke bajaye doosra video (\"$cleanClickedTitle\") play kar diya."
-            )
-            return
-        }
+        // All other on-page clicks (scrolling, clicking comments, reading descriptions, tapping buttons)
+        // are completely safe. Real-time verification (verifyActiveYouTubeVideo) handles actual video changes!
+        return
     }
 
     private fun collectSubtreeText(node: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int) {
@@ -3439,17 +3216,27 @@ class YouTubeLiveSearchService : AccessibilityService() {
     private fun isCommentsSheetOrKeyboardOpen(entries: List<UiNodeEntry>): Boolean {
         if (isSoftKeyboardVisible()) return true
         val now = System.currentTimeMillis()
-        if ((now - lastCommentClickTime) < 3500L || (now - lastTypedCommentTime) < 3500L) {
+        if ((now - lastCommentClickTime) < 8000L || (now - lastTypedCommentTime) < 8000L || (now - lastCommentComposerOpenTime) < 15000L) {
             return true
         }
         val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
         return entries.any { e ->
             val v = e.viewId.lowercase()
             val d = e.desc.trim().lowercase()
+            val t = e.text.trim().lowercase()
 
             (e.isEditable && (v.contains("comment") || v.contains("reply") || v.contains("composer"))) ||
-            ((d == "close comments" || d == "टिप्पणियां बंद करें" || d.contains("close comment") || (v.contains("close_button") && (v.contains("comment") || v.contains("engagement")))) &&
-             e.rect.top in (screenHeight * 0.20f).toInt()..(screenHeight * 0.95f).toInt())
+            v.contains("comment_sheet") ||
+            v.contains("comment_composer") ||
+            v.contains("comment_box") ||
+            (v.contains("engagement_panel") && (t.contains("comment") || d.contains("comment") || t.contains("टिप्पणी"))) ||
+            ((d == "close comments" || d == "टिप्पणियां बंद करें" || d.contains("close comment") || (d == "close" && v.contains("close_button"))) &&
+             e.rect.top in (screenHeight * 0.15f).toInt()..(screenHeight * 0.95f).toInt()) ||
+            t.contains("add a comment") ||
+            t.contains("add a reply") ||
+            t.contains("टिप्पणी जोड़ें") ||
+            d.contains("add a comment") ||
+            d.contains("add a reply")
         }
     }
 
@@ -3824,6 +3611,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val onScreenChannel = channelEntry?.text?.ifBlank { channelEntry.desc }?.trim().takeIf { !it.isNullOrBlank() }
             val activeChannel = onScreenChannel ?: mediaArtist
 
+            val isUserScrolledDown = subscribeAnchor == null || subscribeAnchor.rect.top < playerBottomY
+
             if (cleanedTitleCandidates.isNotEmpty()) {
                 val isGenericTarget = targetTitle.equals("YouTube Video Task", ignoreCase = true) ||
                         targetTitle.equals("YouTube Video", ignoreCase = true) ||
@@ -3840,21 +3629,32 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         lockedWatchPageTitle = matchingCandidate
                     }
                     wrongVideoStrikeCount = 0
-                } else if (!isAdPlaying && !isCommentActive && !isProductActive) {
-                    // None of the candidates on screen match our target video!
-                    val wrongCandidate = cleanedTitleCandidates.firstOrNull { candidate ->
-                        !isGenericTarget &&
-                                TitleMatcher.evaluateMatch(candidate, targetTitle, activeChannel, targetAuthor) == com.example.data.MatchResult.MISMATCH
-                    }
-                    if (wrongCandidate != null) {
-                        wrongVideoStrikeCount++
-                        val isSessionActive = WatchSessionRepository.sessionState.value == com.example.data.SessionState.ACTIVE
-                        if (isSessionActive && (lockedWatchPageTitle != null || wrongVideoStrikeCount >= 1)) {
-                            wrongVideoStrikeCount = 0
-                            WatchSessionRepository.triggerTaskIncomplete(
-                                "Task Incomplete! Target video (\"$targetTitle\") ke bajaye doosra video (\"$wrongCandidate\") chal raha hai."
-                            )
-                            return
+                } else if (!isUserScrolledDown && !isAdPlaying && !isCommentActive && !isProductActive) {
+                    // Check if MediaSession currently matches target video! If media session matches, target video is playing!
+                    val mediaTitleNow = WatchSessionRepository.currentMediaTitle.value
+                    val mediaArtistNow = WatchSessionRepository.currentMediaArtist.value
+                    val isMediaMatching = !mediaTitleNow.isNullOrBlank() &&
+                            TitleMatcher.evaluateMatch(mediaTitleNow, targetTitle, mediaArtistNow, targetAuthor) == com.example.data.MatchResult.MATCH
+
+                    if (isMediaMatching) {
+                        wrongVideoStrikeCount = 0
+                    } else {
+                        // User is at top of page, not scrolled down, comments/products not active, and candidate is mismatch
+                        val wrongCandidate = cleanedTitleCandidates.firstOrNull { candidate ->
+                            !isGenericTarget &&
+                                    TitleMatcher.evaluateMatch(candidate, targetTitle, activeChannel, targetAuthor) == com.example.data.MatchResult.MISMATCH
+                        }
+                        if (wrongCandidate != null) {
+                            wrongVideoStrikeCount++
+                            val isSessionActive = WatchSessionRepository.sessionState.value == com.example.data.SessionState.ACTIVE
+                            // Require at least 6 consecutive confirmed strikes across multiple seconds, never fail on frame 1
+                            if (isSessionActive && wrongVideoStrikeCount >= 6) {
+                                wrongVideoStrikeCount = 0
+                                WatchSessionRepository.triggerTaskIncomplete(
+                                    "Task Incomplete! Target video (\"$targetTitle\") ke bajaye doosra video (\"$wrongCandidate\") chal raha hai."
+                                )
+                                return
+                            }
                         }
                     }
                 }
